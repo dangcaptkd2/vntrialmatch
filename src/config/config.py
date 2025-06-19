@@ -3,7 +3,7 @@ import os
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # API Keys and URLs
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
