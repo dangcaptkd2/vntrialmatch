@@ -24,10 +24,7 @@ pg_conn_params = {
 
 # Elasticsearch connection
 es = Elasticsearch([config.ELASTICSEARCH_URL])
-index_name = "clinical_trials_update"
-
-# Batch size for pagination
-BATCH_SIZE = 1000
+index_name = "aact_search"
 
 # Elasticsearch index mapping
 mapping = {
@@ -248,7 +245,7 @@ def main():
 
     # Process in batches
     last_nct_id = ""
-    batch_size = 1000
+    batch_size = 50000
     count = 0
     time_start = time.time()
     while True:

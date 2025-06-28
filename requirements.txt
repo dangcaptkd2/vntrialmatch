@@ -8,4 +8,4 @@ numpy==1.26.3
 python-jose==3.3.0
 spacy==3.7.2 
 elasticsearch==7.17.9
-psycopg2-binary==2.9.6
+psycopg2-binary

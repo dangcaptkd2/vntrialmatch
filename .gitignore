@@ -202,3 +202,5 @@ __marimo__/
 
 
 .env
+data/
+adhoc/
