@@ -1,23 +1,14 @@
 import json
 
-from utils.llm_utils import get_structured_llm_response
-from utils.prompts import KEYWORD_EXTRACTION_PROMPT, KEYWORD_EXTRACTION_SYSTEM
+from src.utils.llm_utils import get_structured_llm_response
+from src.utils.prompts import KEYWORD_EXTRACTION_PROMPT, KEYWORD_EXTRACTION_SYSTEM
 
 
 class KeywordExtractor:
     def __init__(self):
         self.system_message = KEYWORD_EXTRACTION_SYSTEM
         self.prompt_template = KEYWORD_EXTRACTION_PROMPT
-        self.response_format = {
-            "type": "json_object",
-            "properties": {
-                "medical_conditions": {"type": "array", "items": {"type": "string"}},
-                "biomarkers": {"type": "array", "items": {"type": "string"}},
-                "treatments": {"type": "array", "items": {"type": "string"}},
-                "demographics": {"type": "array", "items": {"type": "string"}},
-                "other_relevant_info": {"type": "array", "items": {"type": "string"}},
-            },
-        }
+        self.response_format = {"type": "json_object"}
 
     def extract_keywords(self, masked_profile):
         """
@@ -34,3 +25,10 @@ class KeywordExtractor:
             prompt, self.system_message, self.response_format
         )
         return json.loads(response)
+
+
+if __name__ == "__main__":
+    extractor = KeywordExtractor()
+    with open("data/patient_data/patient.1.1.txt", "r") as f:
+        masked_profile = f.read()
+    print(extractor.extract_keywords(masked_profile))

@@ -12,14 +12,14 @@ REDIS_URL = os.getenv("REDIS_URL")
 POSTGRES_URL = os.getenv("POSTGRES_URL")
 
 # LLM Settings
-LLM_MODEL = "gpt-4-turbo-preview"  # or "ollama/llama2" for local model
+LLM_MODEL = "gpt-4.1-nano"  # or "ollama/llama2" for local model
 TEMPERATURE = 0.0
 
 # Redis Settings
 REDIS_TRIAL_CRITERIA_KEY = "trial_criteria"
 
 # Elasticsearch Settings
-ES_INDEX_NAME = "clinical_trials"
+ES_INDEX_NAME = "aact_search"
 
 # Streamlit Settings
 STREAMLIT_TITLE = "Clinical Trial Matching System"

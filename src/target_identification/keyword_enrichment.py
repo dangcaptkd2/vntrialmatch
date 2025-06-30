@@ -1,7 +1,7 @@
 import json
 
-from utils.llm_utils import get_structured_llm_response
-from utils.prompts import KEYWORD_ENRICHMENT_PROMPT, KEYWORD_ENRICHMENT_SYSTEM
+from src.utils.llm_utils import get_structured_llm_response
+from src.utils.prompts import KEYWORD_ENRICHMENT_PROMPT, KEYWORD_ENRICHMENT_SYSTEM
 
 
 class KeywordEnricher:
@@ -11,13 +11,8 @@ class KeywordEnricher:
         self.response_format = {
             "type": "json_object",
             "properties": {
-                "original_term": {
-                    "type": "object",
-                    "properties": {
-                        "synonyms": {"type": "array", "items": {"type": "string"}},
-                        "related_terms": {"type": "array", "items": {"type": "string"}},
-                    },
-                }
+                "synonyms": {"type": "array", "items": {"type": "string"}},
+                "related_terms": {"type": "array", "items": {"type": "string"}},
             },
         }
 
@@ -34,7 +29,8 @@ class KeywordEnricher:
         # Flatten keywords into a list
         all_keywords = []
         for category in keywords.values():
-            all_keywords.extend(category)
+            if isinstance(category, list):
+                all_keywords.extend(category)
 
         # Process each keyword
         enriched_terms = {}
