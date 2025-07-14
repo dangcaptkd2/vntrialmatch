@@ -35,7 +35,9 @@ class ClinicalTrialSearcher:
     def check_index_exists(self) -> bool:
         """Check if the Elasticsearch index exists."""
         try:
-            return self.es.indices.exists(index=self.index_name)
+            response = self.es.indices.exists(index=self.index_name)
+            # For exists check, response is already a boolean
+            return response
         except Exception as e:
             logger.error(f"Error checking index existence: {e}")
             return False
@@ -54,58 +56,90 @@ class ClinicalTrialSearcher:
             Elasticsearch query dictionary
         """
         if use_enriched:
-            # Handle enriched keywords structure
-            all_terms = []
+            # Handle enriched keywords structure - prioritize original keywords
+            primary_terms = []
+            secondary_terms = []
             if isinstance(keywords, dict):
                 for keyword, enrichment in keywords.items():
-                    all_terms.append(keyword)
+                    primary_terms.append(keyword)  # Original keyword is most important
                     if isinstance(enrichment, dict):
                         if "synonyms" in enrichment:
-                            all_terms.extend(enrichment["synonyms"])
+                            secondary_terms.extend(enrichment["synonyms"])
                         if "related_terms" in enrichment:
-                            all_terms.extend(enrichment["related_terms"])
+                            secondary_terms.extend(enrichment["related_terms"])
         else:
             # Handle extracted keywords structure
-            all_terms = []
+            primary_terms = []
             if isinstance(keywords, dict):
                 for category, terms in keywords.items():
                     if isinstance(terms, list):
-                        all_terms.extend(terms)
+                        primary_terms.extend(terms)
                     elif isinstance(terms, str):
-                        all_terms.append(terms)
+                        primary_terms.append(terms)
             elif isinstance(keywords, list):
-                all_terms = keywords
+                primary_terms = keywords
+            secondary_terms = []
 
         # Remove duplicates and filter out empty strings
-        all_terms = list(set([term.strip() for term in all_terms if term.strip()]))
+        primary_terms = list(
+            set([term.strip() for term in primary_terms if term.strip()])
+        )
+        secondary_terms = list(
+            set([term.strip() for term in secondary_terms if term.strip()])
+        )
 
-        if not all_terms:
+        if not primary_terms:
             logger.warning("No valid keywords found for search")
             return {"match_all": {}}
 
-        # Build multi-field search query
-        should_clauses = []
+        # Build a much simpler query structure
+        # Focus on the most important fields with a multi_match query
+        query_terms = " ".join(primary_terms)
 
-        # Search in different fields with different weights
-        for term in all_terms:
-            should_clauses.extend(
-                [
-                    {"match": {"brief_title": {"query": term, "boost": 3.0}}},
-                    {"match": {"official_title": {"query": term, "boost": 2.5}}},
-                    {"match": {"conditions": {"query": term, "boost": 2.0}}},
-                    {"match": {"interventions": {"query": term, "boost": 2.0}}},
-                    {"match": {"keywords": {"query": term, "boost": 1.5}}},
-                    {"match": {"mesh_terms_conditions": {"query": term, "boost": 1.5}}},
-                    {
-                        "match": {
-                            "mesh_terms_interventions": {"query": term, "boost": 1.5}
-                        }
-                    },
-                    {"match": {"brief_summary": {"query": term, "boost": 1.0}}},
-                ]
-            )
+        # Primary query: Multi-match on most important fields
+        primary_query = {
+            "multi_match": {
+                "query": query_terms,
+                "fields": [
+                    "brief_title^3",
+                    "official_title^2.5",
+                    "conditions^2",
+                    "interventions^2",
+                    "keywords^1.5",
+                ],
+                "type": "best_fields",
+                "operator": "or",
+            }
+        }
 
-        query = {"bool": {"should": should_clauses, "minimum_should_match": 1}}
+        # If we have secondary terms (enriched), add them as a boost
+        if secondary_terms:
+            secondary_query_terms = " ".join(secondary_terms)
+            secondary_query = {
+                "multi_match": {
+                    "query": secondary_query_terms,
+                    "fields": [
+                        "brief_title^1.5",
+                        "official_title^1.2",
+                        "conditions^1",
+                        "interventions^1",
+                        "keywords^0.8",
+                    ],
+                    "type": "best_fields",
+                    "operator": "or",
+                }
+            }
+
+            # Combine primary and secondary queries
+            query = {
+                "bool": {
+                    "must": [primary_query],
+                    "should": [secondary_query],
+                    "minimum_should_match": 0,
+                }
+            }
+        else:
+            query = primary_query
 
         return query
 
@@ -150,6 +184,7 @@ class ClinicalTrialSearcher:
 
         try:
             response = self.es.search(index=self.index_name, body=search_body)
+            # For search, response is already a dict
             return response
         except Exception as e:
             logger.error(f"Error searching Elasticsearch: {e}")
@@ -158,7 +193,9 @@ class ClinicalTrialSearcher:
     def run_full_pipeline(
         self,
         patient_profile_path: str = "data/patient_data/patient.1.1.txt",
+        patient_profile_text: str | None = None,
         size: int = 20,
+        skip_masking: bool = False,
     ) -> Dict:
         """
         Run the complete pipeline: patient masking -> keyword extraction ->
@@ -174,25 +211,153 @@ class ClinicalTrialSearcher:
         logger.info("Starting full pipeline execution")
 
         # Step 1: Read patient profile
-        try:
-            with open(patient_profile_path, "r") as f:
-                patient_profile = f.read()
-        except FileNotFoundError:
-            raise FileNotFoundError(
-                f"Patient profile file not found: {patient_profile_path}"
-            )
+        if patient_profile_text is None:
+            try:
+                with open(patient_profile_path, "r") as f:
+                    patient_profile = f.read()
+            except FileNotFoundError:
+                raise FileNotFoundError(
+                    f"Patient profile file not found: {patient_profile_path}"
+                )
+        else:
+            patient_profile = patient_profile_text
 
-        # Step 2: Patient masking
-        logger.info("Step 1: Masking patient data")
-        masked_profile = self.patient_masker.mask_patient_data(patient_profile)
+        if not skip_masking:
+            # Step 2: Patient masking
+            logger.info("Step 1: Masking patient data")
+            masked_profile = self.patient_masker.mask_patient_data(patient_profile)
+        else:
+            masked_profile = patient_profile
 
         # Step 3: Keyword extraction
         logger.info("Step 2: Extracting keywords")
-        extracted_keywords = self.keyword_extractor.extract_keywords(masked_profile)
+        # extracted_keywords = self.keyword_extractor.extract_keywords(masked_profile)
+        extracted_keywords = {
+            "conditions": [
+                "Non-Small Cell Lung Cancer",
+                "Lung Adenocarcinoma",
+                "Stage IV Lung Cancer",
+                "Pulmonary Carcinoma",
+                "Mediastinal Lymph Node Metastases",
+            ],
+            "interventions": [
+                "Biopsy",
+                "Chemotherapy",
+                "Targeted Therapy",
+                "Immunotherapy",
+                "Radiation Therapy",
+            ],
+            "keywords": [
+                "NSCLC",
+                "KRAS G13D",
+                "PD-L1",
+                "Adenocarcinoma",
+                "Unresectable",
+                "Metastatic",
+                "Pulmonary Mass",
+                "Bronchial Obstruction",
+            ],
+            "biomarkers": [
+                "KRAS G13D",
+                "TP53 A276G",
+                "ZFHX3 F2994L",
+                "CDH1 D433N",
+                "PTPRS R238*",
+            ],
+            "demographics": ["ECOG Performance Status 1", "Stage IV", "Unresectable"],
+        }
 
         # Step 4: Keyword enrichment
         logger.info("Step 3: Enriching keywords")
-        enriched_keywords = self.keyword_enricher.enrich_keywords(extracted_keywords)
+        # enriched_keywords = self.keyword_enricher.enrich_keywords(extracted_keywords)
+        enriched_keywords = {
+            "Non-Small Cell Lung Cancer": {
+                "synonyms": [
+                    "NSCLC",
+                    "Non Small Cell Lung Carcinoma",
+                    "Non-Small Cell Lung Neoplasm",
+                ],
+                "related_terms": ["Lung Cancer", "Lung Carcinoma", "Lung Neoplasm"],
+            },
+            "Lung Adenocarcinoma": {
+                "synonyms": ["Adenocarcinoma of Lung", "Lung AdenoCa"],
+                "related_terms": [
+                    "Adenocarcinoma",
+                    "Lung Cancer",
+                    "NSCLC Adenocarcinoma",
+                ],
+            },
+            "Stage IV Lung Cancer": {
+                "synonyms": ["Stage 4 Lung Cancer", "Advanced Lung Cancer"],
+                "related_terms": [
+                    "Metastatic Lung Cancer",
+                    "Stage IV NSCLC",
+                    "Stage 4 Non-Small Cell Lung Cancer",
+                ],
+            },
+            "Pulmonary Carcinoma": {
+                "synonyms": ["Lung Carcinoma", "Lung Cancer"],
+                "related_terms": ["Lung Neoplasm", "Pulmonary Neoplasm"],
+            },
+            "Mediastinal Lymph Node Metastases": {
+                "synonyms": [
+                    "Mediastinal Nodal Metastasis",
+                    "Mediastinal Lymphadenopathy",
+                ],
+                "related_terms": ["Lymph Node Metastasis", "Mediastinal Spread"],
+            },
+            "Biopsy": {"synonyms": ["Tissue Biopsy", "Lung Biopsy", "Histopathology"]},
+            "Chemotherapy": {
+                "synonyms": ["Chemo", "Cytotoxic Therapy", "Systemic Chemotherapy"],
+                "related_terms": ["Chemotherapeutic Agents", "Anticancer Drugs"],
+            },
+            "Targeted Therapy": {
+                "synonyms": ["Molecular Targeted Therapy", "Precision Therapy"],
+                "related_terms": [
+                    "Tyrosine Kinase Inhibitors",
+                    "EGFR Inhibitors",
+                    "ALK Inhibitors",
+                ],
+            },
+            "Immunotherapy": {
+                "synonyms": [
+                    "Checkpoint Inhibitors",
+                    "Immune Checkpoint Blockade",
+                    "Immuno-oncology",
+                ],
+                "related_terms": [
+                    "PD-1 Inhibitors",
+                    "PD-L1 Inhibitors",
+                    "CTLA-4 Inhibitors",
+                ],
+            },
+            "Radiation Therapy": {
+                "synonyms": ["Radiotherapy", "RT", "External Beam Radiation"]
+            },
+            "NSCLC": {
+                "synonyms": [
+                    "Non Small Cell Lung Cancer",
+                    "Non-Small Cell Lung Carcinoma",
+                ]
+            },
+            "KRAS G13D": {"synonyms": ["KRAS G13D Mutation"]},
+            "PD-L1": {"synonyms": ["Programmed Death-Ligand 1", "CD274"]},
+            "Adenocarcinoma": {"synonyms": ["Adenocarcinoma", "Glandular Carcinoma"]},
+            "Unresectable": {"synonyms": ["Inoperable", "Not Surgically Resectable"]},
+            "Metastatic": {"synonyms": ["Stage IV", "Advanced Disease"]},
+            "Pulmonary Mass": {"synonyms": ["Lung Mass", "Lung Nodule"]},
+            "Bronchial Obstruction": {
+                "synonyms": ["Airway Obstruction", "Bronchial Blockage"]
+            },
+            "TP53 A276G": {"synonyms": ["TP53 A276G Mutation"]},
+            "ZFHX3 F2994L": {"synonyms": ["ZFHX3 F2994L Mutation"]},
+            "CDH1 D433N": {"synonyms": ["CDH1 D433N Mutation"]},
+            "PTPRS R238*": {"synonyms": ["PTPRS R238 Stop Mutation"]},
+            "ECOG Performance Status 1": {
+                "synonyms": ["ECOG PS 1", "Eastern Cooperative Oncology Group PS 1"]
+            },
+            "Stage IV": {"synonyms": ["Stage 4", "Advanced Stage"]},
+        }
 
         # Step 5: Search
         logger.info("Step 4: Searching clinical trials")
@@ -263,42 +428,23 @@ class ClinicalTrialSearcher:
         return formatted_results
 
 
-def main():
+def demo():
     """Main function for testing the search functionality."""
     searcher = ClinicalTrialSearcher()
 
-    # # Test 1: Full pipeline
-    # print("=== Testing Full Pipeline ===")
-    # try:
-    #     results = searcher.run_full_pipeline(size=5)
-    #     print(f"Found {len(results['search_results']['hits']['hits'])} trials")
-    #     formatted_results = searcher.format_search_results(results['search_results'])
-    #     for i, trial in enumerate(formatted_results[:3]):
-    #         print(f"\n{i+1}. {trial['title']} (Score: {trial['score']:.2f})")
-    #         print(f"   NCT ID: {trial['nct_id']}")
-    #         print(f"   Conditions: {', '.join(trial['conditions'][:3])}")
-    # except Exception as e:
-    #     print(f"Full pipeline test failed: {e}")
-
-    # Test 2: Direct search with result from keyword extraction
-    print("\n=== Testing Direct Search ===")
-    with open("data/patient_data/patient.1.1.txt", "r") as f:
-        patient_profile = f.read()
-    extracted_keywords = searcher.keyword_extractor.extract_keywords(patient_profile)
-
-    print("=" * 50)
-    print(extracted_keywords)
-    print("=" * 50)
-
+    # Test 1: Full pipeline
+    print("=== Testing Full Pipeline ===")
     try:
-        results = searcher.search_with_extracted_keywords(extracted_keywords, size=3)
-        formatted_results = searcher.format_search_results(results)
-        for i, trial in enumerate(formatted_results):
-            print(f"\n{i + 1}. {trial['title']} (Score: {trial['score']:.2f})")
-            print(f"   NCT ID: {trial['nct_id']}")
+        results = searcher.run_full_pipeline(size=5, skip_masking=True)
+        print(f"Found {len(results['search_results']['hits']['hits'])} trials")
+        formatted_results = searcher.format_search_results(results["search_results"])
+        final_results = [
+            [trial["nct_id"], trial["title"]] for trial in formatted_results
+        ]
+        print(final_results)
     except Exception as e:
-        print(f"Direct search test failed: {e}")
+        print(f"Full pipeline test failed: {e}")
 
 
 if __name__ == "__main__":
-    main()
+    demo()

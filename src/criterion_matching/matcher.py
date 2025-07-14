@@ -1,5 +1,7 @@
-from utils.llm_utils import get_llm_response
-from utils.prompts import CRITERIA_MATCHING_PROMPT, CRITERIA_MATCHING_SYSTEM
+import json
+
+from src.utils.llm_utils import get_structured_llm_response
+from src.utils.prompts import CRITERIA_MATCHING_PROMPT, CRITERIA_MATCHING_SYSTEM
 
 
 class CriteriaMatcher:
@@ -22,20 +24,29 @@ class CriteriaMatcher:
             patient_profile=patient_profile, criterion=criterion
         )
 
-        response = get_llm_response(prompt, self.system_message)
+        response_format = {"type": "json_object"}
+        response = get_structured_llm_response(
+            prompt, self.system_message, response_format
+        )
 
-        # Parse the response to extract classification and explanation
-        lines = response.strip().split("\n")
-        classification = None
-        explanation = []
+        # Parse the JSON response
+        if response is None:
+            return {
+                "classification": "unknown",
+                "explanation": "No response from LLM",
+            }
 
-        for line in lines:
-            if line.lower().startswith(("eligible", "ineligible", "unknown")):
-                classification = line.split(":")[0].strip().lower()
-            else:
-                explanation.append(line.strip())
-
-        return {"classification": classification, "explanation": " ".join(explanation)}
+        try:
+            result = json.loads(response)
+            return {
+                "classification": result.get("classification", "unknown"),
+                "explanation": result.get("explanation", "No explanation provided"),
+            }
+        except json.JSONDecodeError:
+            return {
+                "classification": "unknown",
+                "explanation": "Invalid JSON response",
+            }
 
     def match_all_criteria(self, patient_profile, criteria_list):
         """

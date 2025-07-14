@@ -1,6 +1,9 @@
 import openai
 
-from src.config.config import LLM_MODEL, OPENAI_API_KEY, TEMPERATURE
+from src.config.config import OPENAI_API_KEY, TEMPERATURE
+
+# LLM model configuration
+LLM_MODEL = "gpt-4o"
 
 openai.api_key = OPENAI_API_KEY
 
@@ -50,7 +53,7 @@ def get_structured_llm_response(prompt, system_message=None, response_format=Non
         "messages": messages,
         "temperature": TEMPERATURE,
     }
-    
+
     if response_format is not None:
         kwargs["response_format"] = response_format
 

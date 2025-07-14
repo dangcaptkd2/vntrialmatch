@@ -1,22 +1,13 @@
 # Clinical Trial Matching System
 
-This project implements an end-to-end pipeline for matching patients with clinical trials using LLM-based components.
+This system helps match patients with appropriate clinical trials using advanced AI techniques.
 
-## Components
+## Features
 
-1. **Data Processing**
-   - PostgreSQL to Elasticsearch transformation (existing)
-   - Redis storage for trial criteria
-
-2. **Target Trial Identification**
-   - Patient data masking
-   - Keyword extraction
-   - Keyword enrichment
-   - Elasticsearch-based trial search
-
-3. **Criterion-Level Matching**
-   - LLM-based criteria matching
-   - Classification: eligible/ineligible/unknown
+- **Patient Profile Processing**: Masks sensitive information and extracts relevant medical keywords
+- **Trial Search**: Searches ClinicalTrials.gov data using Elasticsearch
+- **Criteria Matching**: Uses LLM to evaluate patient eligibility against trial criteria
+- **Comprehensive Results**: Provides detailed matching scores and explanations
 
 ## Setup
 
@@ -27,33 +18,78 @@ pip install -r requirements.txt
 
 2. Set up environment variables in `.env`:
 ```
-OPENAI_API_KEY=your_api_key
-ELASTICSEARCH_URL=your_es_url
-REDIS_URL=your_redis_url
-POSTGRES_URL=your_postgres_url
+OPENAI_API_KEY=your_openai_api_key
+ELASTICSEARCH_URL=http://localhost:9200
 ```
 
-3. Run the Streamlit app:
+3. Ensure Elasticsearch is running with the AACT data indexed
+
+## Usage
+
+### Command Line Interface
+
+Run the main matching pipeline:
+
 ```bash
-streamlit run app.py
+python main.py
 ```
 
-## Project Structure
+With custom parameters:
+
+```bash
+python main.py \
+  --patient-profile data/patient_data/patient.1.1.txt \
+  --output results/my_results.json \
+  --max-trials 30 \
+  --max-criteria 10
+```
+
+### Parameters
+
+- `--patient-profile`: Path to patient profile file (default: `data/patient_data/patient.1.1.txt`)
+- `--output`: Path to save results (default: `results/trial_matching_results.json`)
+- `--max-trials`: Maximum number of trials to analyze (default: 20)
+- `--max-criteria`: Maximum criteria to evaluate per trial (default: 5)
+
+### Output
+
+The system generates:
+1. **Console Summary**: Top 5 matching trials with scores
+2. **JSON Results**: Detailed results saved to specified file
+3. **Log File**: `trial_matching.log` with detailed execution logs
+
+### Example Output
 
 ```
-.
-├── app.py                    # Streamlit application
-├── config/
-│   └── config.py            # Configuration settings
-├── data_processing/
-│   └── redis_loader.py      # Redis data loading utilities
-├── target_identification/
-│   ├── patient_masking.py   # Patient data masking
-│   ├── keyword_extraction.py # Keyword extraction
-│   └── keyword_enrichment.py # Keyword enrichment
-├── criterion_matching/
-│   └── matcher.py           # Criteria matching logic
-└── utils/
-    ├── llm_utils.py         # LLM utility functions
-    └── prompts.py           # LLM prompts
-``` 
+================================================================================
+CLINICAL TRIAL MATCHING RESULTS SUMMARY
+================================================================================
+
+Total trials analyzed: 20
+Trials with at least one eligible criterion: 15
+
+Top 5 matching trials:
+--------------------------------------------------------------------------------
+1. Study of Osimertinib in Patients With EGFR Mutation Positive NSCLC...
+   Trial ID: NCT02546986
+   Match Score: 80.00% (4/5 criteria)
+
+2. A Study of AZD9291 in Patients With EGFR Mutation Positive NSCLC...
+   Trial ID: NCT01802632
+   Match Score: 60.00% (3/5 criteria)
+...
+```
+
+## Architecture
+
+- `main.py`: Main orchestration script
+- `src/target_identification/search.py`: Trial search functionality
+- `src/criterion_matching/matcher.py`: Criteria matching using LLM
+- `src/utils/`: Utility functions for LLM, prompts, and data processing
+
+## Requirements
+
+- Python 3.8+
+- Elasticsearch with AACT data indexed
+- OpenAI API key
+- Required Python packages (see requirements.txt) 

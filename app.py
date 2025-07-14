@@ -1,202 +1,321 @@
+#!/usr/bin/env python3
+"""
+Streamlit app for clinical trial matching system.
+Provides a beautiful interface for:
+1. Inputting patient profiles
+2. Searching for relevant clinical trials
+3. Matching patient against trial criteria
+4. Displaying results with expandable components
+"""
+
 import json
+import logging
+import sys
+from pathlib import Path
+from typing import Dict, List
 
-import redis
 import streamlit as st
-from elasticsearch import Elasticsearch
 
-from config.config import (
-    ELASTICSEARCH_URL,
-    ES_INDEX_NAME,
-    REDIS_TRIAL_CRITERIA_KEY,
-    REDIS_URL,
-    STREAMLIT_DESCRIPTION,
-    STREAMLIT_TITLE,
+# Add src to path for imports
+sys.path.append(str(Path(__file__).parent / "src"))
+
+from src.criterion_matching.matcher import CriteriaMatcher
+from src.target_identification.search import ClinicalTrialSearcher
+from src.utils import aact_utils
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Page configuration
+st.set_page_config(
+    page_title="Clinical Trial Matching System",
+    page_icon="🏥",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-from criterion_matching.matcher import CriteriaMatcher
-from target_identification.keyword_enrichment import KeywordEnricher
-from target_identification.keyword_extraction import KeywordExtractor
-from target_identification.patient_masking import PatientMasker
 
-# Initialize components
-patient_masker = PatientMasker()
-keyword_extractor = KeywordExtractor()
-keyword_enricher = KeywordEnricher()
-criteria_matcher = CriteriaMatcher()
-
-# Initialize connections
-es = Elasticsearch(ELASTICSEARCH_URL)
-try:
-    redis_client = redis.from_url(REDIS_URL) if REDIS_URL else None
-except Exception as e:
-    st.warning(f"Redis connection failed: {e}")
-    redis_client = None
-
-
-def search_trials(keywords_dict, enriched_keywords=None):
-    """Search clinical trials using structured keywords from different categories."""
-    # Create a more sophisticated search query using the specific Elasticsearch fields
-    should_clauses = []
-    
-    # Search in conditions field
-    if keywords_dict.get("conditions"):
-        for condition in keywords_dict["conditions"]:
-            should_clauses.append({"match": {"conditions": condition}})
-            # Add enriched terms if available
-            if enriched_keywords and condition in enriched_keywords:
-                for synonym in enriched_keywords[condition].get("synonyms", []):
-                    should_clauses.append({"match": {"conditions": synonym}})
-    
-    # Search in interventions field
-    if keywords_dict.get("interventions"):
-        for intervention in keywords_dict["interventions"]:
-            should_clauses.append({"match": {"interventions": intervention}})
-            # Add enriched terms if available
-            if enriched_keywords and intervention in enriched_keywords:
-                for synonym in enriched_keywords[intervention].get("synonyms", []):
-                    should_clauses.append({"match": {"interventions": synonym}})
-    
-    # Search in keywords field
-    if keywords_dict.get("keywords"):
-        for keyword in keywords_dict["keywords"]:
-            should_clauses.append({"match": {"keywords": keyword}})
-            # Add enriched terms if available
-            if enriched_keywords and keyword in enriched_keywords:
-                for synonym in enriched_keywords[keyword].get("synonyms", []):
-                    should_clauses.append({"match": {"keywords": synonym}})
-    
-    # Search in mesh_terms_conditions field
-    if keywords_dict.get("biomarkers"):
-        for biomarker in keywords_dict["biomarkers"]:
-            should_clauses.append({"match": {"mesh_terms_conditions": biomarker}})
-            # Add enriched terms if available
-            if enriched_keywords and biomarker in enriched_keywords:
-                for synonym in enriched_keywords[biomarker].get("synonyms", []):
-                    should_clauses.append({"match": {"mesh_terms_conditions": synonym}})
-    
-    # Search in brief_title and official_title
-    all_terms = []
-    for category in keywords_dict.values():
-        if isinstance(category, list):
-            all_terms.extend(category)
-    
-    for term in all_terms:
-        should_clauses.append({"match": {"brief_title": term}})
-        should_clauses.append({"match": {"official_title": term}})
-        # Add enriched terms if available
-        if enriched_keywords and term in enriched_keywords:
-            for synonym in enriched_keywords[term].get("synonyms", []):
-                should_clauses.append({"match": {"brief_title": synonym}})
-                should_clauses.append({"match": {"official_title": synonym}})
-    
-    # Create the search query
-    search_query = {
-        "query": {
-            "bool": {
-                "should": should_clauses,
-                "minimum_should_match": 1,
-            }
-        },
-        "size": 20,  # Limit results
-        "_source": ["nct_id", "brief_title", "official_title", "conditions", "interventions", "keywords"]
+# Custom CSS for better styling
+st.markdown(
+    """
+<style>
+    .main-header {
+        font-size: 2.5rem;
+        font-weight: bold;
+        color: #1f77b4;
+        text-align: center;
+        margin-bottom: 2rem;
     }
+    .trial-card {
+        background-color: #f8f9fa;
+        border: 1px solid #dee2e6;
+        border-radius: 10px;
+        padding: 1rem;
+        margin-bottom: 1rem;
+    }
+    .criteria-item {
+        background-color: white;
+        border: 1px solid #e9ecef;
+        border-radius: 5px;
+        padding: 0.5rem;
+        margin: 0.25rem 0;
+    }
+    .eligible { border-left: 4px solid #28a745; }
+    .ineligible { border-left: 4px solid #dc3545; }
+    .unknown { border-left: 4px solid #ffc107; }
+    .metric-card {
+        background-color: #f8f9fa;
+        border-radius: 10px;
+        padding: 1rem;
+        text-align: center;
+    }
+</style>
+""",
+    unsafe_allow_html=True,
+)
 
-    # Execute search
-    response = es.search(index=ES_INDEX_NAME, body=search_query)
-    return response["hits"]["hits"]
+
+def get_eligibility_icon(classification: str) -> str:
+    """Get appropriate icon for eligibility classification."""
+    icons = {"eligible": "✅", "ineligible": "❌", "unknown": "❓"}
+    return icons.get(classification, "❓")
 
 
-def get_trial_criteria(nct_id):
-    """Get trial criteria from Redis."""
-    if redis_client is None:
-        return None
-    try:
-        criteria = redis_client.hget(REDIS_TRIAL_CRITERIA_KEY, nct_id)
-        return json.loads(criteria) if criteria else None
-    except Exception as e:
-        st.warning(f"Failed to get trial criteria: {e}")
-        return None
+def get_eligibility_color(classification: str) -> str:
+    """Get appropriate color for eligibility classification."""
+    colors = {"eligible": "#28a745", "ineligible": "#dc3545", "unknown": "#ffc107"}
+    return colors.get(classification, "#6c757d")
+
+
+def match_patient_to_trials(patient_profile: str, trials: List[str]) -> List[Dict]:
+    """
+    Match patient against all trial criteria.
+
+    Args:
+        patient_profile: Patient profile text
+        trials: List of trial NCT IDs
+
+    Returns:
+        List of trial matching results
+    """
+    matcher = CriteriaMatcher()
+    results = []
+
+    progress_bar = st.progress(0)
+    status_text = st.empty()
+
+    for i, nct_id in enumerate(trials):
+        status_text.text(f"Processing trial {i + 1}/{len(trials)}: {nct_id}")
+        progress_bar.progress((i + 1) / len(trials))
+
+        # Get criteria for this trial
+        criteria = aact_utils.get_criteria_by_nct_id(nct_id)
+        criteria_list = aact_utils.parse_clinical_trial_criteria(criteria)
+
+        # Match patient against criteria
+        matching_results = matcher.match_all_criteria(patient_profile, criteria_list)
+
+        # Calculate overall trial match score
+        eligible_count = sum(
+            1
+            for result in matching_results
+            if result["result"]["classification"] == "eligible"
+        )
+        total_criteria = len(matching_results)
+        match_score = eligible_count / total_criteria if total_criteria > 0 else 0
+
+        results.append(
+            {
+                "trial_id": nct_id,
+                "match_score": match_score,
+                "eligible_criteria": eligible_count,
+                "total_criteria": total_criteria,
+                "criteria_matches": matching_results,
+            }
+        )
+
+    progress_bar.empty()
+    status_text.empty()
+    return results
+
+
+def display_trial_results(results: List[Dict]):
+    """Display trial matching results in an expandable format."""
+
+    # Sort results by match score
+    sorted_results = sorted(results, key=lambda x: x["match_score"], reverse=True)
+
+    # Display summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("Total Trials", len(results))
+    with col2:
+        st.metric(
+            "Trials with Matches", sum(1 for r in results if r["match_score"] > 0)
+        )
+    with col3:
+        avg_score = (
+            sum(r["match_score"] for r in results) / len(results) if results else 0
+        )
+        st.metric("Average Match Score", f"{avg_score:.1%}")
+    with col4:
+        best_score = max(r["match_score"] for r in results) if results else 0
+        st.metric("Best Match Score", f"{best_score:.1%}")
+
+    # Style metric cards (removed dependency)
+
+    st.markdown("---")
+
+    # Display each trial
+    for i, result in enumerate(sorted_results):
+        # Trial header with basic info
+        st.markdown(
+            f"### 🏥 **{result['trial_id']}** - Match Score: {result['match_score']:.1%} ({result['eligible_criteria']}/{result['total_criteria']} criteria)"
+        )
+
+        col1, col2 = st.columns([2, 1])
+
+        with col1:
+            st.markdown(f"**Trial ID:** {result['trial_id']}")
+            st.markdown(f"**Match Score:** {result['match_score']:.1%}")
+            st.markdown(
+                f"**Eligible Criteria:** {result['eligible_criteria']}/{result['total_criteria']}"
+            )
+
+        with col2:
+            # Progress bar for match score
+            st.progress(result["match_score"])
+
+            # Color-coded match score
+            if result["match_score"] >= 0.7:
+                st.success("High Match")
+            elif result["match_score"] >= 0.4:
+                st.warning("Medium Match")
+            else:
+                st.error("Low Match")
+
+        # Display criteria matches in a simple list
+        st.markdown("#### Criteria Analysis")
+
+        for criteria_match in result["criteria_matches"]:
+            criterion = criteria_match["criterion"]
+            match_result = criteria_match["result"]
+            classification = match_result["classification"]
+            explanation = match_result["explanation"]
+
+            icon = get_eligibility_icon(classification)
+
+            # Display as simple text with icons
+            st.write(
+                f"{icon} **{criterion[:60]}{'...' if len(criterion) > 60 else ''}**"
+            )
+            st.write(f"**Status:** {classification.title()}")
+            st.write(f"**Reason:** {explanation}")
+            st.write("---")
+
+        st.markdown("---")
 
 
 def main():
-    st.title(STREAMLIT_TITLE)
-    st.write(STREAMLIT_DESCRIPTION)
+    """Main Streamlit app function."""
 
-    # Patient profile input
-    patient_profile = st.text_area("Enter Patient Profile", height=200)
+    # Header
+    st.markdown(
+        '<h1 class="main-header">🏥 Clinical Trial Matching System</h1>',
+        unsafe_allow_html=True,
+    )
 
-    if st.button("Find Matching Trials"):
-        if patient_profile:
-            with st.spinner("Processing..."):
-                # Step 1: Mask patient data
-                masked_profile = patient_masker.mask_patient_data(patient_profile)
+    # Sidebar for configuration
+    with st.sidebar:
+        st.header("⚙️ Configuration")
 
-                # Step 2: Extract keywords
-                keywords = keyword_extractor.extract_keywords(masked_profile)
-                
-                # Display extracted keywords for debugging
-                st.subheader("Extracted Keywords")
-                for category, terms in keywords.items():
-                    if terms:  # Only show non-empty categories
-                        st.write(f"**{category.title()}:** {', '.join(terms)}")
+        max_trials = st.slider("Maximum Trials to Analyze", 1, 10, 5)
+        max_criteria = st.slider("Maximum Criteria per Trial", 5, 20, 10)
 
-                # Step 3: Enrich keywords
-                enriched_keywords = keyword_enricher.enrich_keywords(keywords)
+        st.markdown("---")
+        st.markdown("### 📊 About")
+        st.markdown("""
+        This system helps match patients with appropriate clinical trials using:
+        - **AI-powered keyword extraction**
+        - **Semantic search** in clinical trial database
+        - **Intelligent criteria matching**
+        """)
 
-                # Step 4: Search trials using the structured keywords
-                trial_results = search_trials(keywords, enriched_keywords)
+    # Main content area
+    col1, col2 = st.columns([1, 1])
+
+    with col1:
+        st.header("👤 Patient Profile")
+
+        # Patient profile input
+        patient_profile = st.text_area(
+            "Enter patient profile:",
+            height=400,
+            placeholder="Enter the patient's medical profile, including diagnosis, treatments, demographics, etc...",
+        )
+
+        # Load sample profile button
+        if st.button("📄 Load Sample Profile"):
+            try:
+                with open("data/patient_data/patient.1.1.txt", "r") as f:
+                    patient_profile = f.read()
+                st.success("Sample profile loaded!")
+            except FileNotFoundError:
+                st.error("Sample profile file not found!")
+
+        # Search button
+        search_button = st.button(
+            "🔍 Search Clinical Trials", type="primary", use_container_width=True
+        )
+
+    with col2:
+        st.header("📋 Results")
+
+        if search_button and patient_profile.strip():
+            with st.spinner("Searching for clinical trials..."):
+                # Initialize searcher
+                searcher = ClinicalTrialSearcher()
+
+                search_results = searcher.run_full_pipeline(
+                    patient_profile_text=patient_profile,
+                    size=max_trials,
+                    skip_masking=True,
+                )
+                formatted_results = searcher.format_search_results(
+                    search_results["search_results"]
+                )
+                trials = [trial["nct_id"] for trial in formatted_results]
+
+                if not trials:
+                    st.warning("No trials found matching the patient profile.")
+                    return
+
+                st.success(f"Found {len(trials)} clinical trials!")
+
+                # Match patient against criteria
+                with st.spinner("Analyzing trial criteria..."):
+                    results = match_patient_to_trials(patient_profile, trials)
 
                 # Display results
-                st.subheader(f"Found {len(trial_results)} Matching Trials")
-                
-                for trial in trial_results:
-                    trial_data = trial["_source"]
-                    nct_id = trial_data["nct_id"]
-                    score = trial["_score"]
+                display_trial_results(results)
 
-                    with st.expander(f"{trial_data['brief_title']} (Score: {score:.2f})"):
-                        st.write(f"**NCT ID:** {nct_id}")
-                        st.write(f"**Official Title:** {trial_data.get('official_title', 'N/A')}")
-                        
-                        # Display relevant fields
-                        if trial_data.get('conditions'):
-                            st.write(f"**Conditions:** {', '.join(trial_data['conditions'])}")
-                        if trial_data.get('interventions'):
-                            st.write(f"**Interventions:** {', '.join(trial_data['interventions'])}")
-                        if trial_data.get('keywords'):
-                            st.write(f"**Keywords:** {', '.join(trial_data['keywords'])}")
+                # Download results
+                results_json = json.dumps(results, indent=2)
+                st.download_button(
+                    label="📥 Download Results (JSON)",
+                    data=results_json,
+                    file_name="trial_matching_results.json",
+                    mime="application/json",
+                )
 
-                        # Get and display criteria
-                        criteria = get_trial_criteria(nct_id)
-                        if criteria:
-                            st.subheader("Eligibility Criteria")
+        elif search_button and not patient_profile.strip():
+            st.warning("Please enter a patient profile before searching.")
 
-                            # Match criteria
-                            matching_results = criteria_matcher.match_all_criteria(
-                                patient_profile,
-                                criteria["inclusion_criteria"]
-                                + criteria["exclusion_criteria"],
-                            )
-
-                            # Display results
-                            for result in matching_results:
-                                criterion = result["criterion"]
-                                match_result = result["result"]
-
-                                # Color coding based on classification
-                                color = {
-                                    "eligible": "green",
-                                    "ineligible": "red",
-                                    "unknown": "orange",
-                                }.get(match_result["classification"], "gray")
-
-                                st.markdown(
-                                    f"**{criterion}** - "
-                                    f":{color}[{match_result['classification'].upper()}]"
-                                )
-                                st.write(match_result["explanation"])
-                                st.write("---")
         else:
-            st.warning("Please enter a patient profile.")
+            st.info(
+                "Enter a patient profile and click 'Search Clinical Trials' to begin."
+            )
 
 
 if __name__ == "__main__":

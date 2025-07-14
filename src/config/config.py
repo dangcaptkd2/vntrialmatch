@@ -12,7 +12,8 @@ REDIS_URL = os.getenv("REDIS_URL")
 POSTGRES_URL = os.getenv("POSTGRES_URL")
 
 # LLM Settings
-LLM_MODEL = "gpt-4.1-nano"  # or "ollama/llama2" for local model
+# LLM_MODEL = "gpt-4.1-nano"  # or "ollama/llama2" for local model
+LLM_MODEL = "gpt-4o"
 TEMPERATURE = 0.0
 
 # Redis Settings
