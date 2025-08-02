@@ -1,11 +1,11 @@
 import openai
 
-from src.config.config import OPENAI_API_KEY, TEMPERATURE
+from src.settings import settings
 
 # LLM model configuration
-LLM_MODEL = "gpt-4o"
+LLM_MODEL = settings.llm_model
 
-openai.api_key = OPENAI_API_KEY
+openai.api_key = settings.openai_api_key
 
 
 def get_llm_response(prompt, system_message=None):
@@ -25,7 +25,7 @@ def get_llm_response(prompt, system_message=None):
     messages.append({"role": "user", "content": prompt})
 
     response = openai.chat.completions.create(
-        model=LLM_MODEL, messages=messages, temperature=TEMPERATURE
+        model=LLM_MODEL, messages=messages, temperature=settings.temperature
     )
 
     return response.choices[0].message.content
@@ -51,7 +51,7 @@ def get_structured_llm_response(prompt, system_message=None, response_format=Non
     kwargs = {
         "model": LLM_MODEL,
         "messages": messages,
-        "temperature": TEMPERATURE,
+        "temperature": settings.temperature,
     }
 
     if response_format is not None:

@@ -47,14 +47,14 @@ def extract_criteria(text: str) -> Dict[str, List[str]]:
 if __name__ == "__main__":
     import psycopg2
 
-    from src.config import config
+    from src.settings import settings
 
     pg_conn_params = {
-        "host": config.SQL_HOST,
-        "port": config.SQL_PORT,
-        "dbname": config.SQL_DATABASE_AACT,
-        "user": config.SQL_USERNAME,
-        "password": config.SQL_PASSWORD,
+        "host": settings.sql_host,
+        "port": settings.sql_port,
+        "dbname": settings.sql_database_aact,
+        "user": settings.sql_username,
+        "password": settings.sql_password,
     }
     conn = psycopg2.connect(**pg_conn_params, connect_timeout=300)  # type: ignore
     cursor = conn.cursor()
