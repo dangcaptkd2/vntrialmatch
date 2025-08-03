@@ -148,12 +148,33 @@ def display_trial_results(pipeline_response):
             icon = get_eligibility_icon(criteria_match.classification)
 
             # Display as simple text with icons
-            st.write(
-                f"{icon} **{criteria_match.criteria_text[:60]}{'...' if len(criteria_match.criteria_text) > 60 else ''}**"
-            )
-            st.write(f"**Status:** {criteria_match.classification.title()}")
-            if criteria_match.reasoning:
-                st.write(f"**Reason:** {criteria_match.reasoning}")
+            if criteria_match.criteria_type == "whole":
+                st.write(f"{icon} **Complete Eligibility Criteria**")
+                st.write(f"**Status:** {criteria_match.classification.title()}")
+                if criteria_match.reasoning:
+                    st.write(f"**Overall Assessment:** {criteria_match.reasoning}")
+
+                # Display additional whole criteria information
+                if criteria_match.extracted_info:
+                    info = criteria_match.extracted_info
+                    if "overall_score" in info:
+                        st.write(f"**Overall Score:** {info['overall_score']:.1%}")
+                    if "key_factors" in info and info["key_factors"]:
+                        st.write(
+                            f"**Key Factors:** {', '.join(info['key_factors'][:3])}"
+                        )
+                    if "missing_information" in info and info["missing_information"]:
+                        st.write(
+                            f"**Missing Info:** {', '.join(info['missing_information'][:2])}"
+                        )
+            else:
+                st.write(
+                    f"{icon} **{criteria_match.criteria_text[:60]}{'...' if len(criteria_match.criteria_text) > 60 else ''}**"
+                )
+                st.write(f"**Status:** {criteria_match.classification.title()}")
+                if criteria_match.reasoning:
+                    st.write(f"**Reason:** {criteria_match.reasoning}")
+
             st.write("---")
 
         st.markdown("---")
@@ -174,6 +195,16 @@ def main():
 
         max_trials = st.slider("Maximum Trials to Analyze", 1, 10, 5)
         max_criteria = st.slider("Maximum Criteria per Trial", 5, 20, 10)
+
+        # Classification mode selection
+        classification_mode = st.selectbox(
+            "Classification Mode",
+            ["individual", "whole"],
+            format_func=lambda x: "Individual Criteria"
+            if x == "individual"
+            else "Whole Criteria",
+            help="Individual: Evaluate each criterion separately. Whole: Evaluate all criteria together.",
+        )
 
         st.markdown("---")
         st.markdown("### 📊 About")
@@ -219,6 +250,7 @@ def main():
                         max_criteria_per_trial=max_criteria,
                         skip_masking=True,
                         include_reasoning=True,
+                        classification_mode=classification_mode,
                     )
 
                     st.success(

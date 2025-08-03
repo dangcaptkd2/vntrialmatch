@@ -32,6 +32,7 @@ class PipelineConfig:
     skip_masking: bool = False
     include_reasoning: bool = True
     search_size: int = 20
+    classification_mode: str = "individual"  # "individual" or "whole"
 
 
 class TrialMatchingPipeline:
@@ -154,36 +155,87 @@ class TrialMatchingPipeline:
             if len(criteria_list) > self.config.max_criteria_per_trial:
                 criteria_list = criteria_list[: self.config.max_criteria_per_trial]
 
-            # Match patient against criteria
+            # Match patient against criteria using specified mode
             matching_results = self.matcher.match_all_criteria(
-                patient_profile, criteria_list
+                patient_profile,
+                criteria_list,
+                classification_mode=self.config.classification_mode,
             )
 
-            # Convert to structured format
-            criteria_matches = []
-            for match in matching_results:
-                criteria_matches.append(
-                    CriteriaMatch(
-                        criteria_id=f"{nct_id}_{len(criteria_matches)}",
-                        criteria_text=match["criterion"],
-                        criteria_type="inclusion"
-                        if "inclusion" in match["criterion"].lower()
-                        else "exclusion",
-                        classification=match["result"]["classification"],
-                        confidence=0.8,  # Default confidence
-                        reasoning=match["result"]["explanation"]
-                        if self.config.include_reasoning
-                        else "",
-                        extracted_info={},
+            if self.config.classification_mode == "whole":
+                # Handle whole criteria classification
+                if matching_results and len(matching_results) > 0:
+                    whole_result = matching_results[0]["result"]
+
+                    # Create criteria match for whole criteria
+                    criteria_matches = [
+                        CriteriaMatch(
+                            criteria_id=f"{nct_id}_whole",
+                            criteria_text="Complete eligibility criteria",
+                            criteria_type="whole",
+                            classification=whole_result["classification"],
+                            confidence=whole_result.get("overall_score", 0.8),
+                            reasoning=whole_result["explanation"]
+                            if self.config.include_reasoning
+                            else "",
+                            extracted_info={
+                                "overall_score": whole_result.get("overall_score", 0.0),
+                                "eligible_criteria_count": whole_result.get(
+                                    "eligible_criteria_count", 0
+                                ),
+                                "total_criteria_count": whole_result.get(
+                                    "total_criteria_count", 0
+                                ),
+                                "key_factors": whole_result.get("key_factors", []),
+                                "missing_information": whole_result.get(
+                                    "missing_information", []
+                                ),
+                            },
+                        )
+                    ]
+
+                    # Calculate match score from overall score
+                    match_score = whole_result.get("overall_score", 0.0)
+                    eligible_count = whole_result.get("eligible_criteria_count", 0)
+                    total_criteria = whole_result.get("total_criteria_count", 0)
+
+                else:
+                    # Fallback if no results
+                    criteria_matches = []
+                    match_score = 0.0
+                    eligible_count = 0
+                    total_criteria = 0
+
+            else:
+                # Handle individual criteria classification
+                criteria_matches = []
+                for match in matching_results:
+                    criteria_matches.append(
+                        CriteriaMatch(
+                            criteria_id=f"{nct_id}_{len(criteria_matches)}",
+                            criteria_text=match["criterion"],
+                            criteria_type="inclusion"
+                            if "inclusion" in match["criterion"].lower()
+                            else "exclusion",
+                            classification=match["result"]["classification"],
+                            confidence=0.8,  # Default confidence
+                            reasoning=match["result"]["explanation"]
+                            if self.config.include_reasoning
+                            else "",
+                            extracted_info={},
+                        )
                     )
-                )
 
-            # Calculate overall trial match score
-            eligible_count = sum(
-                1 for match in criteria_matches if match.classification == "eligible"
-            )
-            total_criteria = len(criteria_matches)
-            match_score = eligible_count / total_criteria if total_criteria > 0 else 0
+                # Calculate overall trial match score
+                eligible_count = sum(
+                    1
+                    for match in criteria_matches
+                    if match.classification == "eligible"
+                )
+                total_criteria = len(criteria_matches)
+                match_score = (
+                    eligible_count / total_criteria if total_criteria > 0 else 0
+                )
 
             # Create trial match result
             trial_result = TrialMatchResult(
@@ -282,6 +334,7 @@ def run_trial_matching_pipeline(
     max_criteria_per_trial: int = 10,
     skip_masking: bool = False,
     include_reasoning: bool = True,
+    classification_mode: str = "individual",
 ) -> MatchingResponse:
     """
     Convenience function to run the trial matching pipeline.
@@ -292,6 +345,7 @@ def run_trial_matching_pipeline(
         max_criteria_per_trial: Maximum criteria to evaluate per trial
         skip_masking: Whether to skip patient data masking
         include_reasoning: Whether to include reasoning in results
+        classification_mode: "individual" for per-criterion or "whole" for entire criteria
 
     Returns:
         MatchingResponse with complete results
@@ -301,6 +355,7 @@ def run_trial_matching_pipeline(
         max_criteria_per_trial=max_criteria_per_trial,
         skip_masking=skip_masking,
         include_reasoning=include_reasoning,
+        classification_mode=classification_mode,
     )
 
     pipeline = TrialMatchingPipeline(config)
