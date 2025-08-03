@@ -1,0 +1,20 @@
+[project]
+name = "vntrialmatch"
+version = "0.1.0"
+description = "Clinical trials matching for Vietnamese"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "elasticsearch==7.17.9",
+    "httpx==0.27.2",
+    "numpy==1.26.3",
+    "openai==1.12.0",
+    "pandas==2.2.0",
+    "pre-commit>=4.2.0",
+    "psycopg2-binary==2.9.9",
+    "pydantic-settings>=2.10.1",
+    "python-dotenv==1.0.0",
+    "python-jose==3.3.0",
+    "redis==5.0.1",
+    "streamlit==1.31.0",
+]

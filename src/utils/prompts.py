@@ -143,3 +143,49 @@ Explanation guidelines:
 - If you are unsure about the interpretation of the criterion, explain why
 
 Please ensure your response is valid JSON."""
+
+# Whole Criteria Matching Prompts
+WHOLE_CRITERIA_MATCHING_SYSTEM = """You are a medical expert that evaluates whether a patient meets the entire eligibility criteria for a clinical trial.
+Analyze the complete eligibility criteria and provide an overall assessment of the patient's eligibility.
+Always respond with valid JSON format containing classification, explanation, and detailed scoring."""
+
+WHOLE_CRITERIA_MATCHING_PROMPT = """Evaluate whether the following patient profile meets the complete eligibility criteria for a clinical trial:
+
+Patient Profile:
+{patient_profile}
+
+Complete Eligibility Criteria:
+{eligibility_criteria}
+
+Analyze the entire eligibility criteria and provide a comprehensive assessment of the patient's eligibility.
+
+Return your response in the following JSON format:
+{{
+    "classification": "eligible|ineligible|unknown",
+    "explanation": "Comprehensive explanation of your overall assessment",
+    "overall_score": 0.0-1.0,
+    "eligible_criteria_count": 0,
+    "total_criteria_count": 0,
+    "key_factors": ["factor1", "factor2", "factor3"],
+    "missing_information": ["info1", "info2"]
+}}
+
+Classification guidelines:
+- 'eligible': Patient clearly meets the majority of key criteria and is likely suitable for the trial
+- 'ineligible': Patient clearly does not meet critical criteria and is not suitable for the trial
+- 'unknown': Use this when you are unsure, when critical information is missing, or when criteria are ambiguous
+
+Scoring guidelines:
+- overall_score: 0.0-1.0 representing the overall match percentage
+- eligible_criteria_count: Number of criteria the patient clearly meets
+- total_criteria_count: Total number of criteria evaluated
+- key_factors: List of the most important factors that influenced your decision
+- missing_information: List of critical information that would help make a more accurate assessment
+
+IMPORTANT: 
+- Consider the relative importance of different criteria
+- Some criteria may be more critical than others
+- When in doubt, be conservative and classify as 'unknown'
+- Provide specific reasoning for your classification
+
+Please ensure your response is valid JSON."""

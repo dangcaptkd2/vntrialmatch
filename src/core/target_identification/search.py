@@ -3,10 +3,10 @@ from typing import Dict, List, Optional, Union
 
 from elasticsearch import Elasticsearch
 
-from src.config.config import ELASTICSEARCH_URL, ES_INDEX_NAME
-from src.target_identification.keyword_enrichment import KeywordEnricher
-from src.target_identification.keyword_extraction import KeywordExtractor
-from src.target_identification.patient_masking import PatientMasker
+from src.core.target_identification.keyword_enrichment import KeywordEnricher
+from src.core.target_identification.keyword_extraction import KeywordExtractor
+from src.core.target_identification.patient_masking import PatientMasker
+from src.settings import settings
 
 # Set up logging
 logging.basicConfig(
@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 
 class ClinicalTrialSearcher:
-    def __init__(self, es_url: Optional[str] = None, index_name: str = ES_INDEX_NAME):
+    def __init__(self, es_url: Optional[str] = None, index_name: str = None):
         """
         Initialize the clinical trial searcher.
 
@@ -25,7 +25,9 @@ class ClinicalTrialSearcher:
             index_name: Name of the Elasticsearch index
         """
         if es_url is None:
-            es_url = ELASTICSEARCH_URL or "http://localhost:9200"
+            es_url = settings.elasticsearch_url or "http://localhost:9200"
+        if index_name is None:
+            index_name = settings.es_index_name
         self.es = Elasticsearch([es_url])
         self.index_name = index_name
         self.keyword_extractor = KeywordExtractor()
