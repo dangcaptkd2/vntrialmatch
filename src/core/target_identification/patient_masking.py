@@ -1,4 +1,4 @@
-from src.utils.llm_utils import get_llm_response
+from src.utils.openai_utils import get_llm_response
 from src.utils.prompts import PATIENT_MASKING_PROMPT, PATIENT_MASKING_SYSTEM
 
 

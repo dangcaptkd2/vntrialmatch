@@ -1,6 +1,6 @@
 import json
 
-from src.utils.llm_utils import get_structured_llm_response
+from src.utils.openai_utils import get_structured_llm_response
 from src.utils.prompts import CRITERIA_MATCHING_PROMPT, CRITERIA_MATCHING_SYSTEM
 
 
