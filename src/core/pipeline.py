@@ -33,6 +33,10 @@ class PipelineConfig:
     include_reasoning: bool = True
     search_size: int = 20
     classification_mode: str = "individual"  # "individual" or "whole"
+    use_cache: bool = (
+        True  # Whether to use caching for keyword extraction and enrichment
+    )
+    use_enriched_keywords: bool = True  # Whether to use enriched keywords for search
 
 
 class TrialMatchingPipeline:
@@ -41,7 +45,10 @@ class TrialMatchingPipeline:
     def __init__(self, config: Optional[PipelineConfig] = None):
         """Initialize the pipeline with configuration."""
         self.config = config or PipelineConfig()
-        self.searcher = ClinicalTrialSearcher()
+        self.searcher = ClinicalTrialSearcher(
+            use_cache=self.config.use_cache,
+            use_enriched_keywords=self.config.use_enriched_keywords,
+        )
         self.matcher = CriteriaMatcher()
         self.logger = logging.getLogger(__name__)
 
@@ -175,9 +182,11 @@ class TrialMatchingPipeline:
                             criteria_type="whole",
                             classification=whole_result["classification"],
                             confidence=whole_result.get("overall_score", 0.8),
-                            reasoning=whole_result["explanation"]
-                            if self.config.include_reasoning
-                            else "",
+                            reasoning=(
+                                whole_result["explanation"]
+                                if self.config.include_reasoning
+                                else ""
+                            ),
                             extracted_info={
                                 "overall_score": whole_result.get("overall_score", 0.0),
                                 "eligible_criteria_count": whole_result.get(
@@ -214,14 +223,18 @@ class TrialMatchingPipeline:
                         CriteriaMatch(
                             criteria_id=f"{nct_id}_{len(criteria_matches)}",
                             criteria_text=match["criterion"],
-                            criteria_type="inclusion"
-                            if "inclusion" in match["criterion"].lower()
-                            else "exclusion",
+                            criteria_type=(
+                                "inclusion"
+                                if "inclusion" in match["criterion"].lower()
+                                else "exclusion"
+                            ),
                             classification=match["result"]["classification"],
                             confidence=0.8,  # Default confidence
-                            reasoning=match["result"]["explanation"]
-                            if self.config.include_reasoning
-                            else "",
+                            reasoning=(
+                                match["result"]["explanation"]
+                                if self.config.include_reasoning
+                                else ""
+                            ),
                             extracted_info={},
                         )
                     )
@@ -335,6 +348,8 @@ def run_trial_matching_pipeline(
     skip_masking: bool = False,
     include_reasoning: bool = True,
     classification_mode: str = "individual",
+    use_cache: bool = True,
+    use_enriched_keywords: bool = True,
 ) -> MatchingResponse:
     """
     Convenience function to run the trial matching pipeline.
@@ -346,6 +361,8 @@ def run_trial_matching_pipeline(
         skip_masking: Whether to skip patient data masking
         include_reasoning: Whether to include reasoning in results
         classification_mode: "individual" for per-criterion or "whole" for entire criteria
+        use_cache: Whether to use caching for keyword extraction and enrichment
+        use_enriched_keywords: Whether to use enriched keywords for search
 
     Returns:
         MatchingResponse with complete results
@@ -356,6 +373,8 @@ def run_trial_matching_pipeline(
         skip_masking=skip_masking,
         include_reasoning=include_reasoning,
         classification_mode=classification_mode,
+        use_cache=use_cache,
+        use_enriched_keywords=use_enriched_keywords,
     )
 
     pipeline = TrialMatchingPipeline(config)

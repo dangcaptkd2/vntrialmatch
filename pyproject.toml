@@ -17,4 +17,5 @@ dependencies = [
     "python-jose==3.3.0",
     "redis==5.0.1",
     "streamlit==1.31.0",
+    "tqdm>=4.64.0",
 ]

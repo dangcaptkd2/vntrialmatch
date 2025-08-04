@@ -169,7 +169,7 @@ def display_trial_results(pipeline_response):
                         )
             else:
                 st.write(
-                    f"{icon} **{criteria_match.criteria_text[:60]}{'...' if len(criteria_match.criteria_text) > 60 else ''}**"
+                    f"{icon} **{criteria_match.criteria_text[:200]}{'...' if len(criteria_match.criteria_text) > 60 else ''}**"
                 )
                 st.write(f"**Status:** {criteria_match.classification.title()}")
                 if criteria_match.reasoning:
@@ -200,109 +200,144 @@ def main():
         classification_mode = st.selectbox(
             "Classification Mode",
             ["individual", "whole"],
-            format_func=lambda x: "Individual Criteria"
-            if x == "individual"
-            else "Whole Criteria",
+            format_func=lambda x: (
+                "Individual Criteria" if x == "individual" else "Whole Criteria"
+            ),
             help="Individual: Evaluate each criterion separately. Whole: Evaluate all criteria together.",
         )
+
+        # Cache controls
+        st.markdown("---")
+        st.markdown("### ��️ Cache Settings")
+
+        use_cache = st.checkbox(
+            "Use Cache",
+            value=True,
+            help="Enable caching for keyword extraction and enrichment to improve performance",
+        )
+
+        # Search settings
+        st.markdown("---")
+        st.markdown("### 🔍 Search Settings")
+
+        use_enriched_keywords = st.checkbox(
+            "Use Enriched Keywords",
+            value=True,
+            help="Use enriched keywords (synonyms and related terms) for search. Disable for faster but less comprehensive search.",
+        )
+
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🗑️ Clear Cache", help="Clear all cached results"):
+                from src.utils.cache_manager import cache_manager
+
+                cache_manager.clear_cache()
+                st.success("Cache cleared successfully!")
+
+        with col2:
+            if st.button("📊 Cache Stats", help="Show cache statistics"):
+                from src.utils.cache_manager import cache_manager
+
+                stats = cache_manager.get_cache_stats()
+                st.info(
+                    f"Cache: {stats['valid_entries']} valid, {stats['expired_entries']} expired entries"
+                )
 
         st.markdown("---")
         st.markdown("### 📊 About")
         st.markdown(settings.streamlit_description)
 
-    # Main content area
-    col1, col2 = st.columns([1, 1])
+    # Main content area - Top section for input
+    st.header("👤 Patient Profile")
 
-    with col1:
-        st.header("👤 Patient Profile")
+    # Patient profile input
+    patient_profile = st.text_area(
+        "Enter patient profile:",
+        height=300,
+        placeholder="Enter the patient's medical profile, including diagnosis, treatments, demographics, etc...",
+    )
 
-        # Patient profile input
-        patient_profile = st.text_area(
-            "Enter patient profile:",
-            height=400,
-            placeholder="Enter the patient's medical profile, including diagnosis, treatments, demographics, etc...",
-        )
+    # Load sample profile button
+    if st.button("📄 Load Sample Profile"):
+        try:
+            with open("data/patient_data/patient.1.1.txt", "r") as f:
+                patient_profile = f.read()
+            st.success("Sample profile loaded!")
+        except FileNotFoundError:
+            st.error("Sample profile file not found!")
 
-        # Load sample profile button
-        if st.button("📄 Load Sample Profile"):
+    # Search button
+    search_button = st.button(
+        "🔍 Search Clinical Trials", type="primary", use_container_width=True
+    )
+
+    # Bottom section for results
+    st.markdown("---")
+    st.header("📋 Results")
+
+    if search_button and patient_profile.strip():
+        with st.spinner("Running trial matching pipeline..."):
             try:
-                with open("data/patient_data/patient.1.1.txt", "r") as f:
-                    patient_profile = f.read()
-                st.success("Sample profile loaded!")
-            except FileNotFoundError:
-                st.error("Sample profile file not found!")
+                # Run the complete pipeline
+                pipeline_response = run_trial_matching_pipeline(
+                    patient_profile=patient_profile,
+                    max_trials=max_trials,
+                    max_criteria_per_trial=max_criteria,
+                    skip_masking=True,
+                    include_reasoning=True,
+                    classification_mode=classification_mode,
+                    use_cache=use_cache,
+                    use_enriched_keywords=use_enriched_keywords,
+                )
 
-        # Search button
-        search_button = st.button(
-            "🔍 Search Clinical Trials", type="primary", use_container_width=True
-        )
+                st.success(
+                    f"Pipeline completed in {pipeline_response.processing_time:.2f} seconds!"
+                )
 
-    with col2:
-        st.header("📋 Results")
+                # Display results
+                display_trial_results(pipeline_response)
 
-        if search_button and patient_profile.strip():
-            with st.spinner("Running trial matching pipeline..."):
-                try:
-                    # Run the complete pipeline
-                    pipeline_response = run_trial_matching_pipeline(
-                        patient_profile=patient_profile,
-                        max_trials=max_trials,
-                        max_criteria_per_trial=max_criteria,
-                        skip_masking=True,
-                        include_reasoning=True,
-                        classification_mode=classification_mode,
-                    )
+                # Download results
+                results_dict = {
+                    "request_id": pipeline_response.request_id,
+                    "processing_time": pipeline_response.processing_time,
+                    "summary": pipeline_response.summary,
+                    "results": [
+                        {
+                            "trial_id": result.trial_id,
+                            "match_score": result.match_score,
+                            "eligible_criteria": result.eligible_criteria,
+                            "total_criteria": result.total_criteria,
+                            "criteria_matches": [
+                                {
+                                    "criteria_text": match.criteria_text,
+                                    "classification": match.classification,
+                                    "reasoning": match.reasoning,
+                                }
+                                for match in result.criteria_matches
+                            ],
+                        }
+                        for result in pipeline_response.results
+                    ],
+                }
 
-                    st.success(
-                        f"Pipeline completed in {pipeline_response.processing_time:.2f} seconds!"
-                    )
+                results_json = json.dumps(results_dict, indent=2)
+                st.download_button(
+                    label="📥 Download Results (JSON)",
+                    data=results_json,
+                    file_name="trial_matching_results.json",
+                    mime="application/json",
+                )
 
-                    # Display results
-                    display_trial_results(pipeline_response)
+            except Exception as e:
+                st.error(f"Pipeline execution failed: {str(e)}")
+                logger.error(f"Pipeline error: {e}")
 
-                    # Download results
-                    results_dict = {
-                        "request_id": pipeline_response.request_id,
-                        "processing_time": pipeline_response.processing_time,
-                        "summary": pipeline_response.summary,
-                        "results": [
-                            {
-                                "trial_id": result.trial_id,
-                                "match_score": result.match_score,
-                                "eligible_criteria": result.eligible_criteria,
-                                "total_criteria": result.total_criteria,
-                                "criteria_matches": [
-                                    {
-                                        "criteria_text": match.criteria_text,
-                                        "classification": match.classification,
-                                        "reasoning": match.reasoning,
-                                    }
-                                    for match in result.criteria_matches
-                                ],
-                            }
-                            for result in pipeline_response.results
-                        ],
-                    }
+    elif search_button and not patient_profile.strip():
+        st.warning("Please enter a patient profile before searching.")
 
-                    results_json = json.dumps(results_dict, indent=2)
-                    st.download_button(
-                        label="📥 Download Results (JSON)",
-                        data=results_json,
-                        file_name="trial_matching_results.json",
-                        mime="application/json",
-                    )
-
-                except Exception as e:
-                    st.error(f"Pipeline execution failed: {str(e)}")
-                    logger.error(f"Pipeline error: {e}")
-
-        elif search_button and not patient_profile.strip():
-            st.warning("Please enter a patient profile before searching.")
-
-        else:
-            st.info(
-                "Enter a patient profile and click 'Search Clinical Trials' to begin."
-            )
+    else:
+        st.info("Enter a patient profile and click 'Search Clinical Trials' to begin.")
 
 
 if __name__ == "__main__":

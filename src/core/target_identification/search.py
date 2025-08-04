@@ -16,13 +16,21 @@ logger = logging.getLogger(__name__)
 
 
 class ClinicalTrialSearcher:
-    def __init__(self, es_url: Optional[str] = None, index_name: str = None):
+    def __init__(
+        self,
+        es_url: Optional[str] = None,
+        index_name: str = None,
+        use_cache: bool = True,
+        use_enriched_keywords: bool = True,
+    ):
         """
         Initialize the clinical trial searcher.
 
         Args:
             es_url: Elasticsearch URL
             index_name: Name of the Elasticsearch index
+            use_cache: Whether to use caching for keyword extraction and enrichment
+            use_enriched_keywords: Whether to use enriched keywords for search
         """
         if es_url is None:
             es_url = settings.elasticsearch_url or "http://localhost:9200"
@@ -30,9 +38,11 @@ class ClinicalTrialSearcher:
             index_name = settings.es_index_name
         self.es = Elasticsearch([es_url])
         self.index_name = index_name
-        self.keyword_extractor = KeywordExtractor()
-        self.keyword_enricher = KeywordEnricher()
+        self.keyword_extractor = KeywordExtractor(use_cache=use_cache)
+        self.keyword_enricher = KeywordEnricher(use_cache=use_cache)
         self.patient_masker = PatientMasker()
+        self.use_cache = use_cache
+        self.use_enriched_keywords = use_enriched_keywords
 
     def check_index_exists(self) -> bool:
         """Check if the Elasticsearch index exists."""
@@ -194,8 +204,8 @@ class ClinicalTrialSearcher:
 
     def run_full_pipeline(
         self,
-        patient_profile_path: str = "data/patient_data/patient.1.1.txt",
-        patient_profile_text: str | None = None,
+        patient_profile_path: Optional[str] = None,
+        patient_profile_text: Optional[str] = None,
         size: int = 20,
         skip_masking: bool = False,
     ) -> Dict:
@@ -211,6 +221,11 @@ class ClinicalTrialSearcher:
             Dictionary containing pipeline results
         """
         logger.info("Starting full pipeline execution")
+
+        if patient_profile_path is None and patient_profile_text is None:
+            raise ValueError(
+                "Either patient_profile_path or patient_profile_text must be provided"
+            )
 
         # Step 1: Read patient profile
         if patient_profile_text is None:
@@ -233,139 +248,22 @@ class ClinicalTrialSearcher:
 
         # Step 3: Keyword extraction
         logger.info("Step 2: Extracting keywords")
-        # extracted_keywords = self.keyword_extractor.extract_keywords(masked_profile)
-        extracted_keywords = {
-            "conditions": [
-                "Non-Small Cell Lung Cancer",
-                "Lung Adenocarcinoma",
-                "Stage IV Lung Cancer",
-                "Pulmonary Carcinoma",
-                "Mediastinal Lymph Node Metastases",
-            ],
-            "interventions": [
-                "Biopsy",
-                "Chemotherapy",
-                "Targeted Therapy",
-                "Immunotherapy",
-                "Radiation Therapy",
-            ],
-            "keywords": [
-                "NSCLC",
-                "KRAS G13D",
-                "PD-L1",
-                "Adenocarcinoma",
-                "Unresectable",
-                "Metastatic",
-                "Pulmonary Mass",
-                "Bronchial Obstruction",
-            ],
-            "biomarkers": [
-                "KRAS G13D",
-                "TP53 A276G",
-                "ZFHX3 F2994L",
-                "CDH1 D433N",
-                "PTPRS R238*",
-            ],
-            "demographics": ["ECOG Performance Status 1", "Stage IV", "Unresectable"],
-        }
+        extracted_keywords = self.keyword_extractor.extract_keywords(masked_profile)
 
         # Step 4: Keyword enrichment
         logger.info("Step 3: Enriching keywords")
-        # enriched_keywords = self.keyword_enricher.enrich_keywords(extracted_keywords)
-        enriched_keywords = {
-            "Non-Small Cell Lung Cancer": {
-                "synonyms": [
-                    "NSCLC",
-                    "Non Small Cell Lung Carcinoma",
-                    "Non-Small Cell Lung Neoplasm",
-                ],
-                "related_terms": ["Lung Cancer", "Lung Carcinoma", "Lung Neoplasm"],
-            },
-            "Lung Adenocarcinoma": {
-                "synonyms": ["Adenocarcinoma of Lung", "Lung AdenoCa"],
-                "related_terms": [
-                    "Adenocarcinoma",
-                    "Lung Cancer",
-                    "NSCLC Adenocarcinoma",
-                ],
-            },
-            "Stage IV Lung Cancer": {
-                "synonyms": ["Stage 4 Lung Cancer", "Advanced Lung Cancer"],
-                "related_terms": [
-                    "Metastatic Lung Cancer",
-                    "Stage IV NSCLC",
-                    "Stage 4 Non-Small Cell Lung Cancer",
-                ],
-            },
-            "Pulmonary Carcinoma": {
-                "synonyms": ["Lung Carcinoma", "Lung Cancer"],
-                "related_terms": ["Lung Neoplasm", "Pulmonary Neoplasm"],
-            },
-            "Mediastinal Lymph Node Metastases": {
-                "synonyms": [
-                    "Mediastinal Nodal Metastasis",
-                    "Mediastinal Lymphadenopathy",
-                ],
-                "related_terms": ["Lymph Node Metastasis", "Mediastinal Spread"],
-            },
-            "Biopsy": {"synonyms": ["Tissue Biopsy", "Lung Biopsy", "Histopathology"]},
-            "Chemotherapy": {
-                "synonyms": ["Chemo", "Cytotoxic Therapy", "Systemic Chemotherapy"],
-                "related_terms": ["Chemotherapeutic Agents", "Anticancer Drugs"],
-            },
-            "Targeted Therapy": {
-                "synonyms": ["Molecular Targeted Therapy", "Precision Therapy"],
-                "related_terms": [
-                    "Tyrosine Kinase Inhibitors",
-                    "EGFR Inhibitors",
-                    "ALK Inhibitors",
-                ],
-            },
-            "Immunotherapy": {
-                "synonyms": [
-                    "Checkpoint Inhibitors",
-                    "Immune Checkpoint Blockade",
-                    "Immuno-oncology",
-                ],
-                "related_terms": [
-                    "PD-1 Inhibitors",
-                    "PD-L1 Inhibitors",
-                    "CTLA-4 Inhibitors",
-                ],
-            },
-            "Radiation Therapy": {
-                "synonyms": ["Radiotherapy", "RT", "External Beam Radiation"]
-            },
-            "NSCLC": {
-                "synonyms": [
-                    "Non Small Cell Lung Cancer",
-                    "Non-Small Cell Lung Carcinoma",
-                ]
-            },
-            "KRAS G13D": {"synonyms": ["KRAS G13D Mutation"]},
-            "PD-L1": {"synonyms": ["Programmed Death-Ligand 1", "CD274"]},
-            "Adenocarcinoma": {"synonyms": ["Adenocarcinoma", "Glandular Carcinoma"]},
-            "Unresectable": {"synonyms": ["Inoperable", "Not Surgically Resectable"]},
-            "Metastatic": {"synonyms": ["Stage IV", "Advanced Disease"]},
-            "Pulmonary Mass": {"synonyms": ["Lung Mass", "Lung Nodule"]},
-            "Bronchial Obstruction": {
-                "synonyms": ["Airway Obstruction", "Bronchial Blockage"]
-            },
-            "TP53 A276G": {"synonyms": ["TP53 A276G Mutation"]},
-            "ZFHX3 F2994L": {"synonyms": ["ZFHX3 F2994L Mutation"]},
-            "CDH1 D433N": {"synonyms": ["CDH1 D433N Mutation"]},
-            "PTPRS R238*": {"synonyms": ["PTPRS R238 Stop Mutation"]},
-            "ECOG Performance Status 1": {
-                "synonyms": ["ECOG PS 1", "Eastern Cooperative Oncology Group PS 1"]
-            },
-            "Stage IV": {"synonyms": ["Stage 4", "Advanced Stage"]},
-        }
+        enriched_keywords = self.keyword_enricher.enrich_keywords(extracted_keywords)
 
         # Step 5: Search
         logger.info("Step 4: Searching clinical trials")
-        search_results = self.search_trials(
-            enriched_keywords, use_enriched=True, size=size
-        )
+        if self.use_enriched_keywords:
+            search_results = self.search_trials(
+                enriched_keywords, use_enriched=True, size=size
+            )
+        else:
+            search_results = self.search_trials(
+                extracted_keywords, use_enriched=False, size=size
+            )
 
         return {
             "masked_profile": masked_profile,
@@ -432,20 +330,21 @@ class ClinicalTrialSearcher:
 
 def demo():
     """Main function for testing the search functionality."""
-    searcher = ClinicalTrialSearcher()
+    searcher = ClinicalTrialSearcher(use_enriched_keywords=False)
 
-    # Test 1: Full pipeline
-    print("=== Testing Full Pipeline ===")
-    try:
-        results = searcher.run_full_pipeline(size=5, skip_masking=True)
-        print(f"Found {len(results['search_results']['hits']['hits'])} trials")
-        formatted_results = searcher.format_search_results(results["search_results"])
-        final_results = [
-            [trial["nct_id"], trial["title"]] for trial in formatted_results
-        ]
-        print(final_results)
-    except Exception as e:
-        print(f"Full pipeline test failed: {e}")
+    patient_profile_text = "A 32-year-old woman comes to the hospital with vaginal spotting.  Her last menstrual period was 10 weeks ago. She has regular menses lasting for 6 days and repeating every 29 days. Medical history is significant for appendectomy and several complicated UTIs. She has multiple male partners, and she is inconsistent with using barrier contraceptives. Vital signs are normal.  Serum β-hCG level is 1800 mIU/mL, and a repeat level after 2 days shows an abnormal rise to 2100 mIU/mL.  Pelvic ultrasound reveals a thin endometrium with no gestational sac in the uterus."
+
+    results = searcher.run_full_pipeline(
+        patient_profile_text=patient_profile_text,
+        size=100,
+        skip_masking=True,
+    )
+    print(f"Found {len(results['search_results']['hits']['hits'])} trials")
+    formatted_results = searcher.format_search_results(results["search_results"])
+    # final_results = [[trial["nct_id"], trial["title"]] for trial in formatted_results]
+
+    list_result_nct_id = [trial["nct_id"] for trial in formatted_results]
+    print(list_result_nct_id)
 
 
 if __name__ == "__main__":
